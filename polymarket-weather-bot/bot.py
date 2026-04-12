@@ -6,12 +6,13 @@ import traceback
 from datetime import datetime
 
 from config import CHECK_INTERVAL_MINUTES, DRY_RUN
-from scanner import get_actionable_markets
-from weather import get_forecast, estimate_probabilities
-from comparator import find_opportunities, format_opportunity
-from ai_decision import validate_opportunity
-from risk import kelly_bet_size, format_bet
-from executor import place_bet
+from weather.scanner import get_actionable_markets
+from weather.forecast import get_forecast, estimate_probabilities
+from weather.comparator import find_opportunities, format_opportunity
+from core.ai_decision import validate_opportunity
+from core.risk import kelly_bet_size, format_bet
+from core.executor import place_bet
+from core.logger import log_opportunity
 
 
 def run_cycle():
@@ -36,7 +37,7 @@ def run_cycle():
             continue
 
         # 3. Estimar probabilidades
-        probs = estimate_probabilities(forecast, market["outcomes"])
+        probs = estimate_probabilities(forecast, market["outcomes"], market["type"])
 
         # 4. Encontrar oportunidades
         opps = find_opportunities(market, probs, forecast)
@@ -59,13 +60,19 @@ def run_cycle():
         print(f"  IA: {'✓ Aprovado' if ai_result['approved'] else '✗ Rejeitado'} — {ai_result['reasoning']}")
 
         if not ai_result["approved"]:
+            log_opportunity(opp, reason="ia_rejected")
             print()
             continue
 
         # 6. Calcular tamanho da aposta
-        bet_size = kelly_bet_size(opp["estimated_prob"], opp["market_price"])
+        # SELL = comprar NO token: usar probabilidade e preço do lado NO
+        if opp["side"] == "SELL":
+            bet_size = kelly_bet_size(1 - opp["estimated_prob"], 1 - opp["market_price"])
+        else:
+            bet_size = kelly_bet_size(opp["estimated_prob"], opp["market_price"])
         if bet_size < 1.0:
             print(f"  Aposta muito pequena (${bet_size:.2f}), pulando.\n")
+            log_opportunity(opp, reason="bet_too_small")
             continue
 
         print(f"  {format_bet(bet_size, opp)}")

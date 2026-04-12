@@ -57,6 +57,27 @@ PATTERN_OLD = re.compile(
     re.IGNORECASE,
 )
 
+# Formatos de data tentados em ordem
+DATE_FORMATS = ["%B %d, %Y", "%B %d", "%b %d, %Y", "%b %d"]
+
+
+def _parse_date(date_str: str) -> datetime | None:
+    date_str = date_str.strip()
+    for fmt in DATE_FORMATS:
+        try:
+            parsed = datetime.strptime(date_str, fmt)
+            if parsed.year == 1900:
+                # Sem ano — inferir o mais próximo (pode cruzar virada do ano)
+                now = datetime.now()
+                parsed = parsed.replace(year=now.year)
+                # Se a data ficou muito no passado (>60 dias), provavelmente é ano seguinte
+                if (parsed.date() - now.date()).days < -60:
+                    parsed = parsed.replace(year=now.year + 1)
+            return parsed
+        except ValueError:
+            continue
+    return None
+
 
 def parse_market(market: dict) -> dict | None:
     question = market.get("question", "")
@@ -76,15 +97,8 @@ def parse_market(market: dict) -> dict | None:
         temp_label = None
         date_str = m.group(3).strip()
 
-    for fmt in ["%B %d, %Y", "%B %d"]:
-        try:
-            parsed_date = datetime.strptime(date_str, fmt)
-            if parsed_date.year == 1900:
-                parsed_date = parsed_date.replace(year=datetime.now().year)
-            break
-        except ValueError:
-            continue
-    else:
+    parsed_date = _parse_date(date_str)
+    if not parsed_date:
         return None
 
     prices_raw = market.get("outcomePrices", "[]")
@@ -116,11 +130,14 @@ def parse_market(market: dict) -> dict | None:
 
     yes_price = 0.0
     yes_token = None
+    no_token = None
     for i, outcome in enumerate(outcomes_list):
-        if str(outcome).lower() == "yes":
+        outcome_lower = str(outcome).lower()
+        if outcome_lower == "yes":
             yes_price = prices_list[i] if i < len(prices_list) else 0.0
             yes_token = tokens_list[i] if i < len(tokens_list) else None
-            break
+        elif outcome_lower == "no":
+            no_token = tokens_list[i] if i < len(tokens_list) else None
 
     return {
         "condition_id": market.get("conditionId", ""),
@@ -131,6 +148,7 @@ def parse_market(market: dict) -> dict | None:
         "temp_label": temp_label or question,
         "price": yes_price,
         "token_id": yes_token,
+        "no_token_id": no_token,
         "volume": float(market.get("volume", 0) or 0),
         "slug": market.get("slug", ""),
     }
@@ -142,8 +160,9 @@ def group_markets_by_city_date(parsed_list: list[dict]) -> list[dict]:
     for p in parsed_list:
         key = f"{p['city'].lower()}|{p['date']}|{p['type']}"
         if key not in groups:
+            kind_label = "Highest" if p["type"] == "highest" else "Lowest"
             groups[key] = {
-                "question": f"Highest temperature in {p['city']} on {p['date']}?",
+                "question": f"{kind_label} temperature in {p['city']} on {p['date']}?",
                 "city": p["city"],
                 "date": p["date"],
                 "type": p["type"],
@@ -155,6 +174,7 @@ def group_markets_by_city_date(parsed_list: list[dict]) -> list[dict]:
             "label": p["temp_label"],
             "price": p["price"],
             "token_id": p["token_id"],
+            "no_token_id": p["no_token_id"],
             "condition_id": p["condition_id"],
         })
         groups[key]["volume"] += p["volume"]
@@ -162,25 +182,49 @@ def group_markets_by_city_date(parsed_list: list[dict]) -> list[dict]:
     return list(groups.values())
 
 
-def get_actionable_markets(days_ahead: int = 3) -> list[dict]:
+def _normalize(name: str) -> str:
+    """Normaliza nome de cidade para comparação: minúsculo, sem espaços extras."""
+    return name.lower().strip()
+
+
+def get_actionable_markets(days_ahead: int = 5) -> list[dict]:
     raw_markets = search_weather_markets()
     print(f"[Scanner] {len(raw_markets)} mercados brutos encontrados")
 
     today = datetime.now().date()
     max_date = today + timedelta(days=days_ahead)
-    city_names = {c["name"].lower() for c in CITIES}
+
+    # Conjunto de nomes normalizados das cidades configuradas
+    city_names_normalized = {_normalize(c["name"]) for c in CITIES}
 
     parsed = []
+    skipped_city = set()
+    skipped_date = 0
+
     for m in raw_markets:
         p = parse_market(m)
         if not p:
             continue
+
         market_date = datetime.strptime(p["date"], "%Y-%m-%d").date()
-        if market_date < today or market_date > max_date:
+
+        # Inclui hoje e até days_ahead no futuro
+        if market_date < today:
+            skipped_date += 1
             continue
-        if p["city"].lower() not in city_names:
+        if market_date > max_date:
+            skipped_date += 1
             continue
+
+        city_norm = _normalize(p["city"])
+        if city_norm not in city_names_normalized:
+            skipped_city.add(p["city"])
+            continue
+
         parsed.append(p)
+
+    if skipped_city:
+        print(f"[Scanner] Cidades fora da config (adicione ao config.py se quiser): {sorted(skipped_city)}")
 
     grouped = group_markets_by_city_date(parsed)
     actionable = [g for g in grouped if len(g["outcomes"]) >= 2]
@@ -189,10 +233,34 @@ def get_actionable_markets(days_ahead: int = 3) -> list[dict]:
     return actionable
 
 
+def list_all_available_cities(days_ahead: int = 5) -> list[str]:
+    """Lista todas as cidades com mercados ativos, independente da config."""
+    raw_markets = search_weather_markets()
+    today = datetime.now().date()
+    max_date = today + timedelta(days=days_ahead)
+    cities = set()
+    for m in raw_markets:
+        p = parse_market(m)
+        if not p:
+            continue
+        market_date = datetime.strptime(p["date"], "%Y-%m-%d").date()
+        if today <= market_date <= max_date:
+            cities.add(p["city"])
+    return sorted(cities)
+
+
 if __name__ == "__main__":
+    print("=== Cidades disponíveis na API (próximos 5 dias) ===")
+    cities = list_all_available_cities()
+    for c in cities:
+        print(f"  - {c}")
+
+    print("\n=== Mercados acionáveis (cidades da config) ===")
     markets = get_actionable_markets(days_ahead=5)
-    for m in markets[:5]:
+    for m in markets[:10]:
         print(f"\n{m['question']}")
-        print(f"  Cidade: {m['city']} | Data: {m['date']} | Tipo: {m['type']}")
-        for o in m["outcomes"]:
+        print(f"  Cidade: {m['city']} | Data: {m['date']} | Tipo: {m['type']} | Outcomes: {len(m['outcomes'])}")
+        for o in m["outcomes"][:3]:
             print(f"  {o['label']}: {o['price']:.2f} ({o['price']*100:.0f}%)")
+        if len(m["outcomes"]) > 3:
+            print(f"  ... e mais {len(m['outcomes'])-3} outcomes")

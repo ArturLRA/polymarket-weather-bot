@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cp scanner.py weather/scanner.py)",
+      "Bash(cp weather.py weather/forecast.py)",
+      "Bash(cp comparator.py weather/comparator.py)",
+      "Bash(cp crypto_scanner.py crypto/scanner.py)",
+      "Bash(cp crypto_price.py crypto/price.py)",
+      "Bash(ls -la *.py)",
+      "Bash(ls -la *.json)",
+      "Bash(ls -la *.log)",
+      "Bash(python -c ':*)",
+      "Bash(python backtest.py --days 30)",
+      "Bash(python backtest.py --days 180)",
+      "Bash(python backtest.py --days 7)",
+      "Bash(python sim_6meses.py)",
+      "Bash(python sim_real.py)",
+      "Bash(python plano_crescimento.py)",
+      "Bash(python previsao.py)",
+      "Bash(python tests.py)"
+    ]
+  }
+}

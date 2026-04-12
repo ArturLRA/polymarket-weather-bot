@@ -1,18 +1,18 @@
 """
 Executor: envia ordens para a Polymarket via py-clob-client.
 """
-import json
 from datetime import datetime
 from config import (
     POLYMARKET_HOST, POLYMARKET_CHAIN_ID, PRIVATE_KEY,
-    FUNDER_ADDRESS, SIGNATURE_TYPE, DRY_RUN, LOG_FILE,
+    FUNDER_ADDRESS, SIGNATURE_TYPE, DRY_RUN,
 )
+from core.logger import log_trade
 
 
 def get_client():
     """Cria e retorna um ClobClient autenticado."""
     if not PRIVATE_KEY:
-        raise ValueError("POLY_PRIVATE_KEY não configurada!")
+        raise ValueError("POLY_PRIVATE_KEY não configurada no .env!")
 
     from py_clob_client.client import ClobClient
 
@@ -51,26 +51,27 @@ def place_bet(opportunity: dict, bet_size: float) -> dict:
     if DRY_RUN:
         result["status"] = "simulated"
         print(f"[DRY RUN] Aposta simulada: ${bet_size:.2f} em {opportunity['outcome_label']}")
-        _log_trade(result)
+        log_trade(result)
         return result
 
     if not opportunity.get("token_id"):
         result["status"] = "error"
         result["error"] = "token_id não encontrado"
-        _log_trade(result)
+        log_trade(result)
         return result
 
     try:
         from py_clob_client.clob_types import MarketOrderArgs, OrderType
-        from py_clob_client.order_builder.constants import BUY, SELL
+        from py_clob_client.order_builder.constants import BUY
 
         client = get_client()
-        side = BUY if opportunity["side"] == "BUY" else SELL
-
+        # BUY e SELL sempre resultam em ordem de compra:
+        # - BUY: compra token YES do outcome
+        # - SELL: compra token NO do outcome (token_id já é o NO token, vindo do comparator)
         order = MarketOrderArgs(
             token_id=opportunity["token_id"],
             amount=bet_size,
-            side=side,
+            side=BUY,
             order_type=OrderType.FOK,  # Fill or Kill
         )
         signed = client.create_market_order(order)
@@ -84,18 +85,5 @@ def place_bet(opportunity: dict, bet_size: float) -> dict:
         result["error"] = str(e)
         print(f"[EXECUTOR] Erro: {e}")
 
-    _log_trade(result)
+    log_trade(result)
     return result
-
-
-def _log_trade(trade: dict):
-    """Salva trade no histórico JSON."""
-    try:
-        with open(LOG_FILE, "r") as f:
-            history = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        history = []
-
-    history.append(trade)
-    with open(LOG_FILE, "w") as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)

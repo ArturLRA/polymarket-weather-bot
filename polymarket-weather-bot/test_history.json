@@ -1,0 +1,13 @@
+[
+  {
+    "logged_at": "2026-04-12T13:38:08.986655",
+    "type": "opportunity",
+    "reason": "Regime CHOP — sem tendencia definida",
+    "market": "Bitcoin Up or Down - April 12, 12:30PM-12:45PM ET",
+    "outcome": "BTC UP/DOWN",
+    "side": "NO_TRADE",
+    "market_price": 0.63,
+    "estimated_prob": 0.4429,
+    "edge": 0
+  }
+]

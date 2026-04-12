@@ -41,13 +41,13 @@ def find_opportunities(market: dict, probabilities: list[dict], forecast: dict) 
                 "slug": market.get("slug", ""),
             })
         elif -edge >= MIN_EDGE and (1 - estimated_prob) >= MIN_CONFIDENCE:
-            # Oportunidade de SHORT (comprar NO)
+            # Oportunidade de SHORT: comprar token NO (não vender YES)
             opportunities.append({
                 "market_question": market["question"],
                 "city": market["city"],
                 "date": market["date"],
                 "outcome_label": p["label"],
-                "token_id": p.get("token_id"),
+                "token_id": p.get("no_token_id"),  # token NO para comprar
                 "market_price": market_price,
                 "estimated_prob": estimated_prob,
                 "edge": round(-edge, 4),
